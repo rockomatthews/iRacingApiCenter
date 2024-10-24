@@ -1,15 +1,20 @@
-# render.yaml
 services:
   - type: web
     name: iracing-api-gateway
     env: node
+    plan: free
     buildCommand: npm install
     startCommand: node server.js
     autoDeploy: true
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: IRACING_EMAIL
         sync: false
       - key: IRACING_PASSWORD
         sync: false
       - key: PORT
         value: 10000
+    healthCheckPath: /health
+    healthCheckTimeout: 100
+    healthCheckInterval: 15

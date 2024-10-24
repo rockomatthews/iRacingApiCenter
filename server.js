@@ -7,11 +7,20 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 10000;  // Render.com uses PORT environment variable
 
 // Middleware
 app.use(express.json());
 app.use(cors());
+
+// Basic root route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'iRacing API Gateway Service', 
+    status: 'active',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Rate limiting
 const limiter = rateLimit({
@@ -38,7 +47,7 @@ function encodePassword(password, email) {
   return hash.toString('base64');
 }
 
-// Auth middleware with cookie handling
+// Auth middleware
 async function authenticateIRacing(req, res, next) {
   try {
     const currentTime = Date.now();
@@ -49,12 +58,11 @@ async function authenticateIRacing(req, res, next) {
       const password = process.env.IRACING_PASSWORD;
       
       if (!email || !password) {
-        throw new Error('iRacing credentials not configured in .env file');
+        throw new Error('iRacing credentials not configured in environment variables');
       }
 
       const encodedPassword = encodePassword(password, email);
       
-      // Create a temporary file for cookie storage
       const response = await fetch('https://members-ng.iracing.com/auth', {
         method: 'POST',
         headers: {
@@ -92,6 +100,28 @@ async function authenticateIRacing(req, res, next) {
     res.status(500).json({ error: 'Authentication failed', details: error.message });
   }
 }
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    service: 'iRacing API Gateway',
+    timestamp: new Date().toISOString(),
+    authenticated: !!cookieJar,
+    lastAuthTime: lastAuthTime ? new Date(lastAuthTime).toISOString() : null,
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Test auth endpoint
+app.get('/api/test-auth', authenticateIRacing, (req, res) => {
+  res.json({ 
+    status: 'Authentication successful',
+    lastAuthTime: lastAuthTime ? new Date(lastAuthTime).toISOString() : null,
+    hasCookies: !!cookieJar,
+    cookieJarPreview: cookieJar ? cookieJar.substring(0, 100) + '...' : null
+  });
+});
 
 // RealNameSearch endpoint
 app.get('/api/search/realname', authenticateIRacing, async (req, res) => {
@@ -158,26 +188,33 @@ app.get('/api/search/realname', authenticateIRacing, async (req, res) => {
   }
 });
 
-// Test auth endpoint
-app.get('/api/test-auth', authenticateIRacing, (req, res) => {
-  res.json({ 
-    status: 'Authentication successful',
-    lastAuthTime: lastAuthTime ? new Date(lastAuthTime).toISOString() : null,
-    hasCookies: !!cookieJar,
-    cookieJarPreview: cookieJar ? cookieJar.substring(0, 100) + '...' : null
+// Error handling for undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: 'The requested endpoint does not exist',
+    timestamp: new Date().toISOString()
   });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    authenticated: !!cookieJar,
-    lastAuthTime: lastAuthTime ? new Date(lastAuthTime).toISOString() : null
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message,
+    timestamp: new Date().toISOString()
   });
 });
 
+// Start the server
 app.listen(port, () => {
   debugLog(`iRacing API Gateway running on port ${port}`);
+  debugLog(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Handle process termination
+process.on('SIGTERM', () => {
+  debugLog('SIGTERM received. Performing graceful shutdown...');
+  process.exit(0);
 });
